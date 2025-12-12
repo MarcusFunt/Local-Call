@@ -1,0 +1,46 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+.venv/
+venv/
+
+# Environments and personal config
+.env
+.env.*
+
+# Data and cache
+data/
+cache/
+*.cache
+*.log
+
+# Model weights (large binaries should not be committed)
+stt_models/
+tts_models/
+llm_models/
+
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# Jupyter notebooks and outputs
+*.ipynb_checkpoints
+*.ipynb
+
+# Editor files
+.idea/
+.vscode/
+*.swp
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+/*.egg
+*.wheel
+
+# Node modules (if UI code is added)
+node_modules/
