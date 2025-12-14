@@ -1,26 +1,26 @@
 # Core voice pipeline
-pipecat>=0.4.0
+pipecat-ai
 
 # Networking and server
-fastapi>=0.110
-uvicorn[standard]>=0.27
-websockets>=12.0
-aiohttp>=3.9
+fastapi
+uvicorn
+websockets
+aiohttp
 
 # STT/TTS integration
-nemo_toolkit[asr]>=2.5.0  # Parakeet streaming (optional, GPU recommended)
-soundfile>=0.12
-numpy>=1.24
+nemo_toolkit[asr]  # Parakeet streaming (optional, GPU recommended)
+soundfile
+numpy
 
 # LLM integration
-ollama>=0.1.6  # Python client for the Ollama API
-pydantic>=1.10
-python-dotenv>=1.0
+ollama  # Python client for the Ollama API
+pydantic
+python-dotenv
 
 # Tooling
-tavily-python>=0.2.5  # Web search API
-duckdb>=0.10  # Lightweight DB for memory store
-pyyaml>=6.0
+tavily-python  # Web search API
+duckdb  # Lightweight DB for memory store
+pyyaml
 
 # Development utilities
-pytest>=7.4
+pytest

@@ -60,47 +60,32 @@ the code.
 ### Prerequisites
 
 * Python 3.9+ (tested on 3.11)
+* [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/)
 * A GPU with at least 12 GB of VRAM for production mode (an RTX 3060 12 GB is
   sufficient), or enough CPU and RAM for development mode.
-* [Ollama](https://github.com/ollama/ollama) installed locally with the Qwen3 14 B
-  and Gemma2 2 B models pulled (e.g. `ollama pull qwen3:14b` and `ollama pull gemma2:2b`).
-* [NVIDIA NeMo toolkit](https://docs.nvidia.com) for Parakeet streaming if you want to
-  run the STT model offline.  See the Parakeet model card for installation details【432627428859135†L144-L159】.
-* [VibeVoice Realtime 0.5 B](https://github.com/microsoft/VibeVoice) running as a local
-  service.  The Hugging Face model card includes a WebSocket example【620260211077025†L63-L71】.
 
 ### Setup
 
-1. Clone this repository and create a virtual environment:
+1. Clone this repository:
 
    ```bash
    git clone https://github.com/MarcusFunt/Local-Call.git
    cd Local-Call
-   python3 -m venv .venv
-   source .venv/bin/activate
    ```
 
-2. Install Python dependencies:
+2. Build and run the voice agent:
 
    ```bash
-   pip install -r requirements.txt
+   docker-compose up --build
    ```
 
-3. Configure profiles in `config/profiles/`.  Copy `dev.yaml` and `prod.yaml` and adjust
-   model names, device assignments and timeouts to match your hardware.  See
-   `Agents.md` for more details.
+   This will start the voice agent server on port 8765, along with an Ollama
+   instance for the LLM.
 
-4. Start your STT and TTS services:
-
-   * **Parakeet**:  Run the NeMo streaming server or embed Parakeet in `stt/parakeet_service.py`.
-   * **VibeVoice**:  Launch the WebSocket server provided in the VibeVoice repository or run
-     the containerised service.
-
-5. Run the voice agent:
+3. (Optional) Run the tests:
 
    ```bash
-   python apps/server.py --profile prod  # for production with GPU
-   python apps/server.py --profile dev   # for CPU‑only development
+   docker-compose run tests
    ```
 
 The server exposes a WebSocket endpoint that your client (browser or mobile app) can
