@@ -39,9 +39,9 @@ locally on commodity hardware.
 
 1. **Initial scaffolding**
    - Create repository structure (done).
-   - Implement core pipeline classes (`core/pipeline.py`, `core/session.py`).
+   - Implement core pipeline classes (`core/pipeline.py`, `core/session.py`) (done).
    - Provide stub adapters for STT, LLM and TTS with dummy data so that
-     the pipeline can be exercised without models.
+     the pipeline can be exercised without models (done).
 
 2. **Integrate Parakeet STT**
    - Implement `stt/parakeet_service.py` to run Parakeet offline using
