@@ -42,7 +42,9 @@ The agent is built around a Pipecat `Pipeline` with the following processors【1
 
 1. **Transport input** – captures microphone audio frames.
 2. **Speech‑to‑text** – feeds audio chunks into Parakeet for streaming transcription.  When
-   Parakeet emits `<EOU>` the current utterance is closed and sent to the LLM.
+   Parakeet emits `<EOU>` the current utterance is closed and sent to the LLM.  The production
+   STT wiring lives in `core/pipeline.py` where `ParakeetService` is wrapped by the
+   `ParakeetSTTAdapter` to forward transcripts and end‑of‑utterance signals.
 3. **Context aggregator** – updates conversation history and passes user text to the LLM.
 4. **Language model** – Qwen3‑14 B or Gemma2‑2 B running via Ollama generates tokens, chooses
    tools and streams text frames to TTS.
