@@ -1,0 +1,26 @@
+default_profile: prod
+transport:
+  add_wav_header: false
+  session_timeout: 600
+profiles:
+  prod:
+    stt:
+      riva_uri: localhost:50051
+      prepend_prompt: ""
+      append_prompt: ""
+      dev_buffer_ms: 400
+      dev_max_buffer_ms: 2000
+      end_of_utterance_token: "<EOU>"
+      sample_rate_hz: 16000
+    llm:
+      host: http://localhost:11434
+      persona_path: config/persona_default.md
+      min_vram_gb: 12
+      model_override:
+      tool_call_limit: 3
+    tts:
+      server_uri: ws://localhost:8020/ws
+      voice:
+      flush_on_punctuation: true
+      flush_char_threshold: 80
+      sample_rate_hz: 24000

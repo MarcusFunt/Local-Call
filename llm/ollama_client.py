@@ -1,11 +1,13 @@
 """Ollama-backed chat completion client with streaming and tool support."""
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 from typing import Any, Dict, List, Optional
 
 from ollama import AsyncClient
-from pipecat.frames.frames import Frame, TextFrame
+from pipecat.frames.frames import Frame, InterruptionFrame, TextFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from llm.model_router import ModelRouter
@@ -36,6 +38,7 @@ class OllamaClient(FrameProcessor):
         if system_prompt:
             self._messages.append({"role": "system", "content": system_prompt})
         self._pending_user: List[str] = []
+        self._generation_task: Optional[asyncio.Task[None]] = None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, TextFrame):
@@ -46,7 +49,12 @@ class OllamaClient(FrameProcessor):
             text = " ".join(self._pending_user).strip()
             self._pending_user.clear()
             if text:
-                await self._handle_user_turn(text)
+                await self._cancel_generation()
+                self._generation_task = self.create_task(self._handle_user_turn(text))
+            return
+
+        if isinstance(frame, InterruptionFrame):
+            await self._cancel_generation()
             return
 
         await self.push_frame(frame, direction)
@@ -80,20 +88,23 @@ class OllamaClient(FrameProcessor):
     async def _stream_completion(self, model: str, tools: List[Dict[str, Any]]):
         tool_calls: List[Dict[str, Any]] = []
         content_fragments: List[str] = []
-        async for chunk in self._client.chat(
-            model=model,
-            messages=self._messages,
-            tools=tools if tools else None,
-            stream=True,
-        ):
-            message = chunk.get("message", {})
-            delta = message.get("content")
-            if delta:
-                content_fragments.append(delta)
-                await self.push_frame(TextFrame(delta), FrameDirection.DOWNSTREAM)
-            chunk_tool_calls = message.get("tool_calls") or []
-            if chunk_tool_calls:
-                tool_calls.extend(chunk_tool_calls)
+        try:
+            async for chunk in self._client.chat(
+                model=model,
+                messages=self._messages,
+                tools=tools if tools else None,
+                stream=True,
+            ):
+                message = chunk.get("message", {})
+                delta = message.get("content")
+                if delta:
+                    content_fragments.append(delta)
+                    await self.push_frame(TextFrame(delta), FrameDirection.DOWNSTREAM)
+                chunk_tool_calls = message.get("tool_calls") or []
+                if chunk_tool_calls:
+                    tool_calls.extend(chunk_tool_calls)
+        except asyncio.CancelledError:
+            raise
         assistant_content = "".join(content_fragments).strip()
         return tool_calls, assistant_content
 
@@ -126,5 +137,13 @@ class OllamaClient(FrameProcessor):
         await self._client.close()
 
     async def cleanup(self):
+        await self._cancel_generation()
         await self.aclose()
+
+    async def _cancel_generation(self):
+        if self._generation_task and not self._generation_task.done():
+            self._generation_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._generation_task
+        self._generation_task = None
 

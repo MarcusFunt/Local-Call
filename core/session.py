@@ -1,49 +1,37 @@
 
-"""
-This module defines the Session class, which manages the lifecycle of a
-voice agent pipeline.
-"""
-import asyncio
+"""Session lifecycle management for the voice pipeline."""
+
+from __future__ import annotations
+
+from typing import Optional
+
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
+
 from core.pipeline import create_stub_pipeline
 
+
 class Session:
-    """
-    The Session class manages the lifecycle of a voice agent pipeline.
-    It is responsible for starting and stopping the pipeline, and for
-    handling the transport of audio and text frames between the client
-    and the server.
-    """
+    """Manage the lifecycle of a single conversational session."""
 
-    def __init__(self, transport):
-        """
-        Initializes a new Session object.
-
-        Args:
-            transport: The transport to use for sending and receiving frames.
-        """
+    def __init__(self, transport, profile) -> None:
         self.transport = transport
-        self.pipeline_task = None
-        self.runner = None
+        self.profile = profile
+        self.pipeline_task: Optional[PipelineTask] = None
+        self.runner: Optional[PipelineRunner] = None
 
     async def start(self):
-        """
-        Starts the voice agent pipeline.
-        """
+        """Starts the configured voice agent pipeline."""
+
+        pipeline = create_stub_pipeline(self.profile, self.transport)
+        self.pipeline_task = PipelineTask(pipeline)
         self.runner = PipelineRunner()
-        self.pipeline_task = PipelineTask(
-            create_stub_pipeline(),
-            self.transport.input(),
-            self.transport.output()
-        )
         await self.runner.run(self.pipeline_task)
 
     async def stop(self):
-        """
-        Stops the voice agent pipeline.
-        """
+        """Stop the pipeline and clean up resources."""
+
         if self.runner:
-            await self.runner.stop()
-            self.runner = None
-            self.pipeline_task = None
+            await self.runner.cancel()
+        self.runner = None
+        self.pipeline_task = None

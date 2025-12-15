@@ -1,10 +1,21 @@
-"""
-Voice agent pipeline wiring using Parakeet for speech recognition.
-"""
+"""Voice agent pipeline wiring for Local-Call."""
+from __future__ import annotations
+
 from pathlib import Path
 
+from pipecat.frames.frames import (
+    BotInterruptionFrame,
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
+    CancelFrame,
+    InputAudioRawFrame,
+    InterruptionFrame,
+)
 from pipecat.pipeline.pipeline import Pipeline
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.transcript_processor import TranscriptProcessor
 
+from core.configuration import ProfileConfig
 from llm.model_router import ModelRouter
 from llm.ollama_client import OllamaClient
 from stt.parakeet_adapter import ParakeetSTTAdapter
@@ -14,101 +25,112 @@ from tts.vibevoice_adapter import VibeVoiceAdapter
 from tts.vibevoice_service import VibeVoiceService
 
 
-DEFAULT_RIVA_URI = "localhost:50051"
+class BargeInController(FrameProcessor):
+    """Emit interruption frames when the user speaks over the assistant."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._assistant_speaking = False
+
+    async def process_frame(self, frame, direction: FrameDirection):
+        if isinstance(frame, BotStartedSpeakingFrame):
+            self._assistant_speaking = True
+        elif isinstance(frame, (BotStoppedSpeakingFrame, BotInterruptionFrame, InterruptionFrame)):
+            self._assistant_speaking = False
+
+        if isinstance(frame, CancelFrame):
+            self._assistant_speaking = False
+
+        if isinstance(frame, InputAudioRawFrame) and self._assistant_speaking:
+            # Interrupt downstream processors before letting the new audio through.
+            await self.push_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
+            self._assistant_speaking = False
+
+        await self.push_frame(frame, direction)
 
 
-def create_pipeline(
-    profile: str = "dev",
-    *,
-    riva_uri: str = DEFAULT_RIVA_URI,
-    ollama_host: str = "http://localhost:11434",
-    prepend_prompt: str = "",
-    append_prompt: str = "",
-    dev_buffer_ms: int = 2000,
-    dev_max_buffer_ms: int = 8000,
-    end_of_utterance_token: str = "<EOU>",
-    sample_rate_hz: int = 16000,
-    persona_path: str = "config/persona_default.md",
-    min_vram_gb: int = 12,
-    model_override: str | None = None,
-    tool_call_limit: int = 3,
-    vibevoice_uri: str = "ws://localhost:8020/ws",
-    vibevoice_voice: str | None = None,
-    flush_on_punctuation: bool = True,
-    flush_char_threshold: int = 120,
-):
-    """Create a pipeline configured for production or development.
+class ContextFrames:
+    """Factory wrapper for transcript processors used in the pipeline."""
 
-    Args:
-        profile: Either ``"prod"`` (true streaming) or ``"dev"`` (buffered batches).
-        riva_uri: URI of the running Riva server.
-        ollama_host: Base URL for the Ollama API endpoint.
-        prepend_prompt: Optional text prepended to each transcript.
-        append_prompt: Optional text appended to each transcript (e.g., guidance).
-        dev_buffer_ms: Buffer window used in development mode before decoding.
-        dev_max_buffer_ms: Maximum buffer size in development mode.
-        end_of_utterance_token: Token emitted by the ASR to signal the end of a turn.
-        sample_rate_hz: Sample rate for incoming audio.
-        persona_path: Path to the persona/system prompt file.
-        min_vram_gb: Minimum VRAM required to select the larger model.
-        model_override: Explicit model name to use instead of auto-selection.
-        tool_call_limit: Maximum depth of nested tool calls per turn.
-        vibevoice_uri: WebSocket endpoint for the VibeVoice server.
-        vibevoice_voice: Optional voice/style identifier to request from VibeVoice.
-        flush_on_punctuation: Flush buffered text to TTS when punctuation is detected (dev/burst mode).
-        flush_char_threshold: Maximum characters to buffer before forcing a flush in dev mode.
-    """
+    def __init__(self) -> None:
+        self._transcript = TranscriptProcessor()
 
-    dev_mode = profile != "prod"
+    def user(self):
+        return self._transcript.user()
+
+    def assistant(self):
+        return self._transcript.assistant()
+
+
+def create_pipeline(profile: ProfileConfig, transport) -> Pipeline:
+    """Create a configured pipeline for the given profile and transport."""
+
+    dev_mode = profile.name != "prod"
 
     parakeet_service = ParakeetService(
-        server_uri=riva_uri,
-        sample_rate_hz=sample_rate_hz,
-        end_of_utterance_token=end_of_utterance_token,
+        server_uri=profile.stt.riva_uri,
+        sample_rate_hz=profile.stt.sample_rate_hz,
+        end_of_utterance_token=profile.stt.end_of_utterance_token,
         dev_mode=dev_mode,
-        dev_buffer_ms=dev_buffer_ms,
-        max_buffer_ms=dev_max_buffer_ms,
-        initial_prompt=prepend_prompt or None,
+        dev_buffer_ms=profile.stt.dev_buffer_ms,
+        max_buffer_ms=profile.stt.dev_max_buffer_ms,
+        initial_prompt=profile.stt.prepend_prompt or None,
     )
 
     stt_adapter = ParakeetSTTAdapter(
         parakeet_service,
-        prepend_prompt=prepend_prompt,
-        append_prompt=append_prompt,
+        prepend_prompt=profile.stt.prepend_prompt,
+        append_prompt=profile.stt.append_prompt,
     )
 
-    model_router = ModelRouter(persona_path=Path(persona_path), min_vram_gb=min_vram_gb, override_model=model_override)
+    model_router = ModelRouter(
+        persona_path=Path(profile.llm.persona_path),
+        min_vram_gb=profile.llm.min_vram_gb,
+        override_model=profile.llm.model_override,
+    )
     system_prompt = model_router.load_persona()
     tool_registry = create_default_registry()
+
     llm_client = OllamaClient(
         model_router=model_router,
         tool_registry=tool_registry,
-        profile=profile,
+        profile=profile.name,
         system_prompt=system_prompt,
-        host=ollama_host,
-        tool_call_limit=tool_call_limit,
+        host=profile.llm.host,
+        tool_call_limit=profile.llm.tool_call_limit,
     )
 
     vibevoice_service = VibeVoiceService(
-        server_uri=vibevoice_uri,
-        voice=vibevoice_voice,
+        server_uri=profile.tts.server_uri,
+        voice=profile.tts.voice,
         dev_mode=dev_mode,
     )
     tts_adapter = VibeVoiceAdapter(
         vibevoice_service,
         streaming_mode=not dev_mode,
-        flush_on_punctuation=flush_on_punctuation,
-        flush_char_threshold=flush_char_threshold,
+        flush_on_punctuation=profile.tts.flush_on_punctuation,
+        flush_char_threshold=profile.tts.flush_char_threshold,
+        sample_rate_hz=profile.tts.sample_rate_hz,
     )
 
-    return Pipeline([
-        stt_adapter,
-        llm_client,
-        tts_adapter,
-    ])
+    barge_in = BargeInController()
+    context = ContextFrames()
+
+    return Pipeline(
+        [
+            transport.input(),
+            barge_in,
+            stt_adapter,
+            context.user(),
+            llm_client,
+            tts_adapter,
+            transport.output(),
+            context.assistant(),
+        ]
+    )
 
 
-def create_stub_pipeline():
-    """Alias to the main pipeline for backwards compatibility."""
+def create_stub_pipeline(profile: ProfileConfig, transport):
+    """Alias maintained for backwards compatibility."""
 
-    return create_pipeline()
+    return create_pipeline(profile, transport)

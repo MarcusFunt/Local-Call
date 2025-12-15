@@ -1,16 +1,14 @@
-"""
-Pipecat adapter that feeds audio into :class:`ParakeetService` and emits text
-frames with end-of-utterance markers.
-"""
+"""Pipecat adapter that feeds audio into Parakeet and emits transcripts."""
 from __future__ import annotations
 
 import asyncio
 from typing import AsyncIterator, Optional
 
-from pipecat.frames.frames import AudioFrame, Frame, TextFrame
+from pipecat.frames.frames import Frame, InputAudioRawFrame, TranscriptionFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.utils.time import time_now_iso8601
 
-from stt.parakeet_service import ParakeetService, TranscriptSegment
+from stt.parakeet_service import ParakeetService
 
 
 class EndOfUtteranceFrame(Frame):
@@ -46,7 +44,13 @@ class ParakeetSTTAdapter(FrameProcessor):
             if not segment.text:
                 continue
             text = f"{self._prepend_prompt}{segment.text}{self._append_prompt}".strip()
-            await self.push_frame(TextFrame(text), FrameDirection.DOWNSTREAM)
+            transcript = TranscriptionFrame(
+                text=text,
+                user_id="anonymous",
+                timestamp=time_now_iso8601(),
+                result=segment,
+            )
+            await self.push_frame(transcript, FrameDirection.DOWNSTREAM)
             if segment.end_of_utterance:
                 await self.push_frame(EndOfUtteranceFrame(), FrameDirection.DOWNSTREAM)
 
@@ -61,7 +65,7 @@ class ParakeetSTTAdapter(FrameProcessor):
             self._transcribe_task = None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        if isinstance(frame, AudioFrame):
+        if isinstance(frame, InputAudioRawFrame):
             await self._ensure_transcriber()
             await self._audio_queue.put(frame.audio)
         else:

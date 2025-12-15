@@ -5,7 +5,16 @@ import asyncio
 import contextlib
 from typing import AsyncIterator, List, Optional
 
-from pipecat.frames.frames import Frame, TextFrame, AudioFrame
+from pipecat.frames.frames import (
+    BotInterruptionFrame,
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
+    Frame,
+    InterruptionFrame,
+    OutputAudioRawFrame,
+    TTSTextFrame,
+    TextFrame,
+)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from tts.vibevoice_service import VibeVoiceService
@@ -21,20 +30,27 @@ class VibeVoiceAdapter(FrameProcessor):
         streaming_mode: bool = True,
         flush_on_punctuation: bool = True,
         flush_char_threshold: int = 120,
+        sample_rate_hz: int = 24000,
     ) -> None:
         super().__init__()
         self._service = service
         self._streaming_mode = streaming_mode
         self._flush_on_punctuation = flush_on_punctuation
         self._flush_char_threshold = flush_char_threshold
+        self._sample_rate_hz = sample_rate_hz
         self._buffer: List[str] = []
         self._text_queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
         self._stream_task: Optional[asyncio.Task[None]] = None
         self._burst_task: Optional[asyncio.Task[None]] = None
+        self._speaking = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, TextFrame):
             self._buffer.append(frame.text)
+            await self.push_frame(
+                TTSTextFrame(frame.text, includes_inter_frame_spaces=True),
+                FrameDirection.DOWNSTREAM,
+            )
             if self._streaming_mode:
                 await self._ensure_streaming()
                 await self._flush_buffer(streaming=True)
@@ -42,7 +58,7 @@ class VibeVoiceAdapter(FrameProcessor):
                 await self._flush_buffer(streaming=False)
             return
 
-        if frame.__class__.__name__ == "StartInterruptionFrame":
+        if isinstance(frame, (InterruptionFrame, BotInterruptionFrame)):
             await self._cancel_playback()
             return
 
@@ -52,6 +68,7 @@ class VibeVoiceAdapter(FrameProcessor):
                 await self._stop_streaming()
             else:
                 await self._drain_burst_task()
+            await self._maybe_emit_stopped()
             await self.push_frame(frame, direction)
             return
 
@@ -65,8 +82,15 @@ class VibeVoiceAdapter(FrameProcessor):
             yield text
 
     async def _stream_audio(self):
+        if not self._speaking:
+            self._speaking = True
+            await self.push_frame(BotStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
+
         async for audio in self._service.stream_synthesis(self._text_generator()):
-            await self.push_frame(AudioFrame(audio), FrameDirection.DOWNSTREAM)
+            await self.push_frame(
+                OutputAudioRawFrame(audio=audio, sample_rate=self._sample_rate_hz, num_channels=1),
+                FrameDirection.DOWNSTREAM,
+            )
 
     async def _ensure_streaming(self):
         if not self._stream_task or self._stream_task.done():
@@ -79,6 +103,7 @@ class VibeVoiceAdapter(FrameProcessor):
                 await self._stream_task
             finally:
                 self._stream_task = None
+            await self._maybe_emit_stopped()
 
     async def _drain_burst_task(self):
         if self._burst_task:
@@ -86,6 +111,7 @@ class VibeVoiceAdapter(FrameProcessor):
                 await self._burst_task
             finally:
                 self._burst_task = None
+            await self._maybe_emit_stopped()
 
     async def _flush_buffer(self, *, streaming: bool, force: bool = False):
         if not self._buffer:
@@ -117,8 +143,15 @@ class VibeVoiceAdapter(FrameProcessor):
         return False
 
     async def _play_burst(self, text: str):
+        if not self._speaking:
+            self._speaking = True
+            await self.push_frame(BotStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
         async for audio in self._service.synthesize_burst(text):
-            await self.push_frame(AudioFrame(audio), FrameDirection.DOWNSTREAM)
+            await self.push_frame(
+                OutputAudioRawFrame(audio=audio, sample_rate=self._sample_rate_hz, num_channels=1),
+                FrameDirection.DOWNSTREAM,
+            )
+        await self._maybe_emit_stopped()
 
     async def _cancel_playback(self):
         self._buffer.clear()
@@ -129,6 +162,7 @@ class VibeVoiceAdapter(FrameProcessor):
                 with contextlib.suppress(asyncio.CancelledError):
                     await self._stream_task
                 self._stream_task = None
+            await self._maybe_emit_interrupted()
             while not self._text_queue.empty():
                 try:
                     self._text_queue.get_nowait()
@@ -141,3 +175,14 @@ class VibeVoiceAdapter(FrameProcessor):
                     await self._burst_task
                 self._burst_task = None
             await self._service.cancel()
+            await self._maybe_emit_interrupted()
+
+    async def _maybe_emit_interrupted(self):
+        if self._speaking:
+            await self.push_frame(BotInterruptionFrame(), FrameDirection.DOWNSTREAM)
+        await self._maybe_emit_stopped()
+
+    async def _maybe_emit_stopped(self):
+        if self._speaking:
+            self._speaking = False
+            await self.push_frame(BotStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
