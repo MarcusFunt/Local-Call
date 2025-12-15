@@ -12,8 +12,25 @@ services:
       - .:/app
     environment:
       - PYTHONUNBUFFERED=1
+      - PROFILE=${PROFILE:-dev}
     depends_on:
       - ollama
+      - xtts-streaming-server
+      - whisper
+
+  whisper:
+    build:
+      context: stt/whisper_cpp_server
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+
+  xtts-streaming-server:
+    build:
+      context: tts/xtts_streaming_server
+      dockerfile: Dockerfile
+    ports:
+      - "8020:8020"
 
   ollama:
     image: ollama/ollama

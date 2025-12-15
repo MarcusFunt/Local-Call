@@ -1,0 +1,32 @@
+
+default_profile: dev
+
+transport:
+  add_wav_header: false
+  session_timeout: 300
+
+profiles:
+  dev:
+    stt:
+      server_url: "http://whisper:8080/inference"
+      buffer_size_ms: 2000
+      silence_timeout_ms: 500
+    llm:
+      host: "http://ollama:11434"
+      persona_path: "config/persona_default.md"
+      min_vram_gb: 12
+    tts:
+      server_url: "http://xtts-streaming-server:8020/tts"
+      sample_rate_hz: 16000
+
+  prod:
+    stt:
+      server_url: "http://whisper:8080/inference"
+      buffer_size_ms: 2000
+      silence_timeout_ms: 500
+    llm:
+      host: "http://ollama:11434"
+      min_vram_gb: 12
+    tts:
+      server_url: "http://xtts-streaming-server:8020/tts"
+      sample_rate_hz: 16000

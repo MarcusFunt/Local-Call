@@ -1,6 +1,7 @@
 """Profile and application configuration loading for the voice pipeline."""
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
@@ -20,13 +21,9 @@ class TransportConfig:
 class STTConfig:
     """Speech-to-text settings."""
 
-    riva_uri: str
-    prepend_prompt: str = ""
-    append_prompt: str = ""
-    dev_buffer_ms: int = 2000
-    dev_max_buffer_ms: int = 8000
-    end_of_utterance_token: str = "<EOU>"
-    sample_rate_hz: int = 16000
+    server_url: str
+    buffer_size_ms: int = 2000
+    silence_timeout_ms: int = 500
 
 
 @dataclass
@@ -44,11 +41,7 @@ class LLMConfig:
 class TTSConfig:
     """Text-to-speech settings."""
 
-    server_uri: str = "ws://localhost:8020/ws"
-    voice: Optional[str] = None
-    flush_on_punctuation: bool = True
-    flush_char_threshold: int = 120
-    sample_rate_hz: int = 24000
+    server_url: str
 
 
 @dataclass
@@ -121,3 +114,16 @@ def load_app_config(path: str | Path) -> AppConfig:
         raise ValueError("No profiles defined in configuration file")
 
     return AppConfig(default_profile=default_profile, transport=transport, profiles=profiles)
+
+
+_app_config: Optional[AppConfig] = None
+
+
+def get_config() -> ProfileConfig:
+    """Return the active profile configuration."""
+    global _app_config
+    if _app_config is None:
+        _app_config = load_app_config("config/config.yml")
+
+    profile_name = os.environ.get("PROFILE")
+    return _app_config.profile(profile_name)
