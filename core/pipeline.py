@@ -10,7 +10,8 @@ from llm.ollama_client import OllamaClient
 from stt.parakeet_adapter import ParakeetSTTAdapter
 from stt.parakeet_service import ParakeetService
 from tools.registry import create_default_registry
-from tts.stub_tts_service import StubTTSService
+from tts.vibevoice_adapter import VibeVoiceAdapter
+from tts.vibevoice_service import VibeVoiceService
 
 
 DEFAULT_RIVA_URI = "localhost:50051"
@@ -31,6 +32,10 @@ def create_pipeline(
     min_vram_gb: int = 12,
     model_override: str | None = None,
     tool_call_limit: int = 3,
+    vibevoice_uri: str = "ws://localhost:8020/ws",
+    vibevoice_voice: str | None = None,
+    flush_on_punctuation: bool = True,
+    flush_char_threshold: int = 120,
 ):
     """Create a pipeline configured for production or development.
 
@@ -48,6 +53,10 @@ def create_pipeline(
         min_vram_gb: Minimum VRAM required to select the larger model.
         model_override: Explicit model name to use instead of auto-selection.
         tool_call_limit: Maximum depth of nested tool calls per turn.
+        vibevoice_uri: WebSocket endpoint for the VibeVoice server.
+        vibevoice_voice: Optional voice/style identifier to request from VibeVoice.
+        flush_on_punctuation: Flush buffered text to TTS when punctuation is detected (dev/burst mode).
+        flush_char_threshold: Maximum characters to buffer before forcing a flush in dev mode.
     """
 
     dev_mode = profile != "prod"
@@ -80,10 +89,22 @@ def create_pipeline(
         tool_call_limit=tool_call_limit,
     )
 
+    vibevoice_service = VibeVoiceService(
+        server_uri=vibevoice_uri,
+        voice=vibevoice_voice,
+        dev_mode=dev_mode,
+    )
+    tts_adapter = VibeVoiceAdapter(
+        vibevoice_service,
+        streaming_mode=not dev_mode,
+        flush_on_punctuation=flush_on_punctuation,
+        flush_char_threshold=flush_char_threshold,
+    )
+
     return Pipeline([
         stt_adapter,
         llm_client,
-        StubTTSService(),
+        tts_adapter,
     ])
 
 
