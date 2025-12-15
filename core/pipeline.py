@@ -1,11 +1,15 @@
 """
 Voice agent pipeline wiring using Parakeet for speech recognition.
 """
+from pathlib import Path
+
 from pipecat.pipeline.pipeline import Pipeline
 
-from llm.stub_llm_service import StubLLMService
+from llm.model_router import ModelRouter
+from llm.ollama_client import OllamaClient
 from stt.parakeet_adapter import ParakeetSTTAdapter
 from stt.parakeet_service import ParakeetService
+from tools.registry import create_default_registry
 from tts.stub_tts_service import StubTTSService
 
 
@@ -16,24 +20,34 @@ def create_pipeline(
     profile: str = "dev",
     *,
     riva_uri: str = DEFAULT_RIVA_URI,
+    ollama_host: str = "http://localhost:11434",
     prepend_prompt: str = "",
     append_prompt: str = "",
     dev_buffer_ms: int = 2000,
     dev_max_buffer_ms: int = 8000,
     end_of_utterance_token: str = "<EOU>",
     sample_rate_hz: int = 16000,
+    persona_path: str = "config/persona_default.md",
+    min_vram_gb: int = 12,
+    model_override: str | None = None,
+    tool_call_limit: int = 3,
 ):
     """Create a pipeline configured for production or development.
 
     Args:
         profile: Either ``"prod"`` (true streaming) or ``"dev"`` (buffered batches).
         riva_uri: URI of the running Riva server.
+        ollama_host: Base URL for the Ollama API endpoint.
         prepend_prompt: Optional text prepended to each transcript.
         append_prompt: Optional text appended to each transcript (e.g., guidance).
         dev_buffer_ms: Buffer window used in development mode before decoding.
         dev_max_buffer_ms: Maximum buffer size in development mode.
         end_of_utterance_token: Token emitted by the ASR to signal the end of a turn.
         sample_rate_hz: Sample rate for incoming audio.
+        persona_path: Path to the persona/system prompt file.
+        min_vram_gb: Minimum VRAM required to select the larger model.
+        model_override: Explicit model name to use instead of auto-selection.
+        tool_call_limit: Maximum depth of nested tool calls per turn.
     """
 
     dev_mode = profile != "prod"
@@ -54,9 +68,21 @@ def create_pipeline(
         append_prompt=append_prompt,
     )
 
+    model_router = ModelRouter(persona_path=Path(persona_path), min_vram_gb=min_vram_gb, override_model=model_override)
+    system_prompt = model_router.load_persona()
+    tool_registry = create_default_registry()
+    llm_client = OllamaClient(
+        model_router=model_router,
+        tool_registry=tool_registry,
+        profile=profile,
+        system_prompt=system_prompt,
+        host=ollama_host,
+        tool_call_limit=tool_call_limit,
+    )
+
     return Pipeline([
         stt_adapter,
-        StubLLMService(),
+        llm_client,
         StubTTSService(),
     ])
 
