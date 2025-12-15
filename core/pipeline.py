@@ -18,11 +18,11 @@ from pipecat.processors.transcript_processor import TranscriptProcessor
 from core.configuration import ProfileConfig
 from llm.model_router import ModelRouter
 from llm.ollama_client import OllamaClient
-from stt.parakeet_adapter import ParakeetSTTAdapter
-from stt.parakeet_service import ParakeetService
+from stt.whisper_cpp_adapter import WhisperCPPAdapter
+from stt.whisper_cpp_service import WhisperCPPService
 from tools.registry import create_default_registry
-from tts.vibevoice_adapter import VibeVoiceAdapter
-from tts.vibevoice_service import VibeVoiceService
+from tts.xtts_streaming_adapter import XTTSStreamingAdapter
+from tts.xtts_streaming_service import XTTSStreamingService
 
 
 class BargeInController(FrameProcessor):
@@ -67,20 +67,14 @@ def create_pipeline(profile: ProfileConfig, transport) -> Pipeline:
 
     dev_mode = profile.name != "prod"
 
-    parakeet_service = ParakeetService(
-        server_uri=profile.stt.riva_uri,
-        sample_rate_hz=profile.stt.sample_rate_hz,
-        end_of_utterance_token=profile.stt.end_of_utterance_token,
-        dev_mode=dev_mode,
-        dev_buffer_ms=profile.stt.dev_buffer_ms,
-        max_buffer_ms=profile.stt.dev_max_buffer_ms,
-        initial_prompt=profile.stt.prepend_prompt or None,
+    whisper_service = WhisperCPPService(
+        server_url=profile.stt.server_url,
     )
 
-    stt_adapter = ParakeetSTTAdapter(
-        parakeet_service,
-        prepend_prompt=profile.stt.prepend_prompt,
-        append_prompt=profile.stt.append_prompt,
+    stt_adapter = WhisperCPPAdapter(
+        whisper_service,
+        buffer_size_ms=profile.stt.buffer_size_ms,
+        silence_timeout_ms=profile.stt.silence_timeout_ms,
     )
 
     model_router = ModelRouter(
@@ -100,17 +94,11 @@ def create_pipeline(profile: ProfileConfig, transport) -> Pipeline:
         tool_call_limit=profile.llm.tool_call_limit,
     )
 
-    vibevoice_service = VibeVoiceService(
-        server_uri=profile.tts.server_uri,
-        voice=profile.tts.voice,
-        dev_mode=dev_mode,
+    xtts_service = XTTSStreamingService(
+        server_url=profile.tts.server_url,
     )
-    tts_adapter = VibeVoiceAdapter(
-        vibevoice_service,
-        streaming_mode=not dev_mode,
-        flush_on_punctuation=profile.tts.flush_on_punctuation,
-        flush_char_threshold=profile.tts.flush_char_threshold,
-        sample_rate_hz=profile.tts.sample_rate_hz,
+    tts_adapter = XTTSStreamingAdapter(
+        xtts_service,
     )
 
     barge_in = BargeInController()

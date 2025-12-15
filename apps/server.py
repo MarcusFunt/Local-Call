@@ -1,51 +1,21 @@
 
-"""FastAPI server entry point for the voice agent."""
-
 import asyncio
-import os
+import logging
+from fastapi import FastAPI, WebSocket, Response
+from fastapi.staticfiles import StaticFiles
+from core.custom_transport import JSONWebsocketTransport
+from core.pipeline import create_pipeline
+from core.configuration import get_config
 
-from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket
-from pipecat.serializers.protobuf import ProtobufFrameSerializer
-from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams, FastAPIWebsocketTransport
-
-from core.configuration import load_app_config
-from core.session import Session
-
-load_dotenv()
-
-CONFIG_PATH = os.getenv("APP_CONFIG", "config/dev.yaml")
-APP_CONFIG = load_app_config(CONFIG_PATH)
+logging.basicConfig(level=logging.INFO)
 
 app = FastAPI()
-
+app.mount("/", StaticFiles(directory="web", html=True), name="web")
 
 @app.websocket("/voice")
-async def voice(websocket: WebSocket):
-    """Handle an incoming websocket voice session."""
-
+async def voice_websocket(websocket: WebSocket):
     await websocket.accept()
-    profile_name = websocket.query_params.get("profile") if websocket.query_params else None
-    profile = APP_CONFIG.profile(profile_name)
-
-    serializer = ProtobufFrameSerializer()
-    params = FastAPIWebsocketParams(
-        add_wav_header=APP_CONFIG.transport.add_wav_header,
-        serializer=serializer,
-        session_timeout=APP_CONFIG.transport.session_timeout,
-    )
-    transport = FastAPIWebsocketTransport(websocket, params)
-
-    session = Session(transport, profile)
-    task = asyncio.create_task(session.start())
-
-    try:
-        await task
-    finally:
-        await session.stop()
-
-
-if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run(app, host="0.0.0.0", port=8765)
+    config = get_config()
+    transport = JSONWebsocketTransport(websocket)
+    pipeline = create_pipeline(config, transport)
+    await pipeline.run()
